@@ -52,6 +52,7 @@ def analyze_stats(stats, mask, method_names):
   print('Total result mean')
   for i, method_name in enumerate(method_names):
     print(method_name)
+    print("Reg Recall; Mean TE; Mean RE; Mean Time; --; Mean Precision; Mean Recall")
     print(stats[i].mean(0))
 
   print('Total successful result mean')
@@ -59,6 +60,7 @@ def analyze_stats(stats, mask, method_names):
     sel = stats[i][:, 0] > 0
     sel_stats = stats[i][sel]
     print(method_name)
+    print("Success Rate; Mean TE; Mean RE; Mean Time; --; Mean Precision; Mean Recall")
     print(sel_stats.mean(0))
 
 
@@ -90,7 +92,7 @@ def evaluate(methods, method_names, data_loader, config, debug=False):
 
   # Accumulate success, rre, rte, time, sid
   mask = np.zeros((tot_num_data, 1)).astype(int)
-  stats = np.zeros((len(methods), tot_num_data, 5))
+  stats = np.zeros((len(methods), tot_num_data, 7))
 
   dataset = data_loader.dataset
   subset_names = open(dataset.DATA_FILES[dataset.phase]).read().split()
@@ -106,7 +108,7 @@ def evaluate(methods, method_names, data_loader, config, debug=False):
 
     for i, method in enumerate(methods):
       start = time.time()
-      T = method.register(xyz0, xyz1)
+      T, precision, recall = method.register(xyz0, xyz1, inlier_thr=0.10, T_gt=T_gt)
       end = time.time()
 
       # Visualize
@@ -123,6 +125,8 @@ def evaluate(methods, method_names, data_loader, config, debug=False):
                                         config.success_rre_thresh)
       stats[i, batch_idx, 3] = end - start
       stats[i, batch_idx, 4] = sid
+      stats[i, batch_idx, 5] = precision
+      stats[i, batch_idx, 6] = recall
       mask[batch_idx] = 1
       if stats[i, batch_idx, 0] == 0:
         print(f"{method_names[i]}: failed")
@@ -132,7 +136,7 @@ def evaluate(methods, method_names, data_loader, config, debug=False):
       analyze_stats(stats, mask, method_names)
 
   # Save results
-  filename = f'3dmatch-stats_{method.__class__.__name__}'
+  filename = f'3dmatch-stats_{method.__class__.__name__}' + '_noicp_nosg_mutual'
   if os.path.isdir(config.out_dir):
     out_file = os.path.join(config.out_dir, filename)
   else:
@@ -174,7 +178,7 @@ if __name__ == '__main__':
   data_loader = torch.utils.data.DataLoader(dset,
                                             batch_size=1,
                                             shuffle=False,
-                                            num_workers=1,
+                                            num_workers=10,
                                             collate_fn=lambda x: x,
                                             pin_memory=False,
                                             drop_last=True)
