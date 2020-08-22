@@ -98,6 +98,7 @@ def evaluate(methods, method_names, data_loader, config, debug=False):
   dataset = data_loader.dataset
   subset_names = open(dataset.DATA_FILES[dataset.phase]).read().split()
 
+  total_safe_guard = 0
   for batch_idx in range(tot_num_data):
     batch = data_loader_iter.next()
 
@@ -107,10 +108,12 @@ def evaluate(methods, method_names, data_loader, config, debug=False):
     sid = subset_names.index(sname)
     T_gt = np.linalg.inv(trans)
 
+    
     for i, method in enumerate(methods):
       start = time.time()
-      T, precision, recall = method.register(xyz0, xyz1, inlier_thr=0.10, T_gt=T_gt)
+      T, precision, recall, outlier_rejection_time, safe_guard = method.register(xyz0, xyz1, T_gt=T_gt)
       end = time.time()
+      total_safe_guard += safe_guard
 
       # Visualize
       if debug:
@@ -124,7 +127,7 @@ def evaluate(methods, method_names, data_loader, config, debug=False):
 
       stats[i, batch_idx, :3] = rte_rre(T, T_gt, config.success_rte_thresh,
                                         config.success_rre_thresh)
-      stats[i, batch_idx, 3] = end - start
+      stats[i, batch_idx, 3] = outlier_rejection_time # not including feature extraction time.
       stats[i, batch_idx, 4] = sid
       stats[i, batch_idx, 5] = precision
       stats[i, batch_idx, 6] = recall
@@ -134,10 +137,13 @@ def evaluate(methods, method_names, data_loader, config, debug=False):
 
     if batch_idx % 10 == 9:
       print('Summary {} / {}'.format(batch_idx, tot_num_data))
+      print(f"Safe guard number: {total_safe_guard} / {batch_idx}")
       analyze_stats(stats, mask, method_names)
 
+  
   # Save results
-  filename = f'3dmatch-stats_{method.__class__.__name__}' + '_noicp_nosg_mutual'
+  print(f"Total safe guard ratio: {total_safe_guard} / {tot_num_data}")
+  filename = f'3dmatch-stats_{method.__class__.__name__}' + '_noicp'
   if os.path.isdir(config.out_dir):
     out_file = os.path.join(config.out_dir, filename)
   else:

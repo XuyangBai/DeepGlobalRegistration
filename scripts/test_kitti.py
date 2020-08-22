@@ -9,7 +9,8 @@ import sys
 import logging
 import argparse
 import numpy as np
-import open3d as o3d
+import open3d as o3d 
+import time
 
 import torch
 
@@ -62,8 +63,9 @@ def evaluate(config, data_loader, method):
     test_iter = data_loader.__iter__()
     N = len(test_iter)
 
-    stats = np.zeros((N, 5))  # bool succ, rte, rre, time, drive id
-
+    stats = np.zeros((N, 7))  # bool succ, rte, rre, time, drive id
+    total_safe_guard = 0
+    #for i in range(10):
     for i in range(len(data_loader)):
         data_timer.tic()
         try:
@@ -77,39 +79,47 @@ def evaluate(config, data_loader, method):
         T_gt = data_dict['T_gt'][0].numpy()
         xyz0np, xyz1np = xyz0.numpy(), xyz1.numpy()
 
-        T_pred = method.register(xyz0np, xyz1np)
+        start = time.time() 
+        T_pred, precision, recall, outlier_rejection_time, safe_guard = method.register(xyz0np, xyz1np, T_gt=T_gt) 
+        end = time.time()
+        total_safe_guard += safe_guard
 
         stats[i, :3] = rte_rre(T_pred, T_gt, TE_THRESH, RE_THRESH)
-        stats[i, 3] = method.reg_timer.diff + method.feat_timer.diff
+        stats[i, 3] = outlier_rejection_time # method.reg_timer.diff + method.feat_timer.diff
         stats[i, 4] = drive
+        stats[i, 5] = precision
+        stats[i, 6] = recall
 
         if stats[i, 0] == 0:
             logging.info(f"Failed with RTE: {stats[i, 1]}, RRE: {stats[i, 2]}")
 
         if i % 10 == 0:
-            succ_rate, rte, rre, avg_time, _ = stats[:i + 1].mean(0)
+            succ_rate, rte, rre, avg_time, _, precision, recall = stats[:i + 1].mean(0)
             logging.info(
                 f"{i} / {N}: Data time: {data_timer.avg}, Feat time: {method.feat_timer.avg},"
                 + f" Reg time: {method.reg_timer.avg}, RTE: {rte}," +
-                f" RRE: {rre}, Success: {succ_rate * 100} %")
+                f" RRE: {rre}, Success: {succ_rate * 100} %" +
+                f" Precision: {precision*100:.2f}%, Recall: {recall*100:.2f}%")
 
         if VISUALIZE and i % 10 == 9:
             visualize_pair(xyz0, xyz1, T_pred, config.voxel_size)
 
-    succ_rate, rte, rre, avg_time, _ = stats.mean(0)
+    print(f"Total safe guard ratio: {total_safe_guard} / {len(data_loader)}")
+    succ_rate, rte, rre, avg_time, _, precision, recall = stats.mean(0)
     logging.info(
         f"Data time: {data_timer.avg}, Feat time: {method.feat_timer.avg}," +
         f" Reg time: {method.reg_timer.avg}, RTE: {rte}," +
-        f" RRE: {rre}, Success: {succ_rate * 100} %")
+        f" RRE: {rre}, Success: {succ_rate * 100} %" + 
+        f" Precision: {precision*100:.2f}%, Recall: {recall*100:.2f}%")
 
     # Save results
-    filename = f'kitti-stats_{method.__class__.__name__}'
-    if config.out_filename is not None:
-        filename += f'_{config.out_filename}'
-    if isinstance(method, FCGFWrapper):
-        filename += '_' + method.method
-        if 'ransac' in method.method:
-            filename += f'_{config.ransac_iter}'
+    filename = f'kitti-stats_{method.__class__.__name__}_noicp_nosg'
+    #if config.out_filename is not None:
+    #    filename += f'_{config.out_filename}'
+    #if isinstance(method, FCGFWrapper):
+    #    filename += '_' + method.method
+    #    if 'ransac' in method.method:
+    #        filename += f'_{config.ransac_iter}'
     if os.path.isdir(config.out_dir):
         out_file = os.path.join(config.out_dir, filename)
     else:

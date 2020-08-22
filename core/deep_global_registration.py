@@ -71,7 +71,7 @@ class DeepGlobalRegistration:
     self.safeguard_method = 'correspondence'  # correspondence, feature_matching
 
     # Final tuning
-    self.use_icp = True
+    self.use_icp = False
 
     # Misc
     self.feat_timer = Timer()
@@ -231,7 +231,7 @@ class DeepGlobalRegistration:
       raise ValueError('Undefined')
     return T
 
-  def register(self, xyz0, xyz1, inlier_thr=0.00):
+  def register(self, xyz0, xyz1, T_gt=None):
     '''
     Main algorithm of DeepGlobalRegistration
     '''
@@ -243,13 +243,42 @@ class DeepGlobalRegistration:
 
       # Step 1: Feature extraction
       self.feat_timer.tic()
+      ## generate fpfh features
+      # pcd0 = make_open3d_point_cloud(xyz0)
+      # pcd1 = make_open3d_point_cloud(xyz1)
+      # pcd0.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*2, max_nn=30))
+      # fpfh0 = o3d.registration.compute_fpfh_feature(pcd0, o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*5, max_nn=100))
+      # fpfh_np0 = np.array(fpfh0.data).T
+      # pcd1.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*2, max_nn=30))
+      # fpfh1 = o3d.registration.compute_fpfh_feature(pcd1, o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*5, max_nn=100))
+      # fpfh_np1 = np.array(fpfh1.data).T
+      # fcgf_feats0 = torch.from_numpy(fpfh_np0).cuda()
+      # fcgf_feats1 = torch.from_numpy(fpfh_np1).cuda()
+
       fcgf_feats0 = self.fcgf_feature_extraction(feats0, coords0)
       fcgf_feats1 = self.fcgf_feature_extraction(feats1, coords1)
       self.feat_timer.toc()
+      # np.savez_compressed(
+      #   os.path.join('KITTI_trainval/', f'kitti_pair_{i}'),
+      #   xyz0=xyz0.detach().cpu().numpy(),
+      #   features0=fcgf_feats0.detach().cpu().numpy(),
+      #   xyz1=xyz1.detach().cpu().numpy(),
+      #   features1=fcgf_feats1.detach().cpu().numpy(),
+      #   gt_trans=T_gt
+      # )
 
       # Step 2: Coarse correspondences
       corres_idx0, corres_idx1 = self.fcgf_feature_matching(fcgf_feats0, fcgf_feats1)
-
+      # _, corres_idx0 = self.fcgf_feature_matching(fcgf_feats0, fcgf_feats1)
+      # _, corres_idx1 = self.fcgf_feature_matching(fcgf_feats1, fcgf_feats0)
+      # mutual_nearest = (corres_idx1[corres_idx0] == torch.arange(corres_idx0.shape[0]).cuda() )
+      # # corr = []
+      # # for i in range(len(corres_idx0)):
+      # #   if corres_idx1[corres_idx0[i]] == i:
+      # #     corr.append([i, corres_idx0[i]])
+      # mutual_corres_idx0 = torch.where(mutual_nearest == 1)[0]
+      # mutual_corres_idx1 = corres_idx0[mutual_nearest]
+      # corres_idx0, corres_idx1 = mutual_corres_idx0, mutual_corres_idx1
       # Step 3: Inlier feature generation
       # coords[corres_idx0]: 1D temporal + 3D spatial coord
       # coords[corres_idx1, 1:]: 3D spatial coord
@@ -261,6 +290,8 @@ class DeepGlobalRegistration:
                                                     corres_idx0, corres_idx1)
 
       # Step 4: Inlier likelihood estimation and truncation
+      import time 
+      s_time = time.time()
       logit = self.inlier_prediction(inlier_feats.contiguous(), coords=inlier_coords)
       weights = logit.sigmoid()
       if self.clip_weight_thresh > 0:
@@ -269,11 +300,13 @@ class DeepGlobalRegistration:
 
     # Step 5: Registration. Note: torch's gradient may be required at this stage
     # > Case 0: Weighted Procrustes + Robust Refinement
-    wsum_threshold = max(200, len(weights) * 0.05)
+    #wsum_threshold = max(200, len(weights) * 0.05)
+    wsum_threshold = -1
     sign = '>=' if wsum >= wsum_threshold else '<'
     print(f'=> Weighted sum {wsum:.2f} {sign} threshold {wsum_threshold}')
 
     T = np.identity(4)
+    safe_guard = 0
     if wsum >= wsum_threshold:
       try:
         rot, trans, opt_output = GlobalRegistration(xyz0[corres_idx0],
@@ -296,6 +329,7 @@ class DeepGlobalRegistration:
         print('###############################################')
 
     else:
+      safe_guard = 1
       # > Case 1: Safeguard RANSAC + (Optional) ICP
       pcd0 = make_open3d_point_cloud(xyz0)
       pcd1 = make_open3d_point_cloud(xyz1)
@@ -315,5 +349,27 @@ class DeepGlobalRegistration:
           make_open3d_point_cloud(xyz0),
           make_open3d_point_cloud(xyz1), self.voxel_size * 2, T,
           o3d.registration.TransformationEstimationPointToPoint()).transformation
+    e_time = time.time() 
 
-    return T
+    eps = np.finfo(float).eps
+    inlier_xyz0 = np.array(xyz0[corres_idx0])
+    inlier_xyz1 = np.array(xyz1[corres_idx1])
+    pcd0 = o3d.geometry.PointCloud()
+    pcd0.points = o3d.utility.Vector3dVector(inlier_xyz0)
+    pcd0.transform(T_gt)
+    inlier_xyz0_warped = np.array(pcd0.points)
+    dis = np.sqrt( np.sum( (inlier_xyz0_warped- inlier_xyz1)**2, -1) + eps)
+    is_correct = dis < 2 * self.voxel_size
+    
+    target = torch.from_numpy(is_correct).squeeze()
+    neg_target = (~target).to(torch.bool)
+    pred = weights > self.clip_weight_thresh
+    pred_on_pos, pred_on_neg = pred[target], pred[neg_target]
+    tp = pred_on_pos.sum().item()
+    fp = pred_on_neg.sum().item()
+    tn = (~pred_on_neg).sum().item()
+    fn = (~pred_on_pos).sum().item()
+    precision = tp / (tp + fp + eps)
+    recall = tp / (tp + fn + eps)
+      
+    return T, precision, recall, e_time - s_time, safe_guard
