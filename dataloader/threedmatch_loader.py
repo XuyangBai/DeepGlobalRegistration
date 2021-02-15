@@ -170,7 +170,7 @@ class ThreeDMatchTrajectoryDataset(PairDataset):
     if scene_id is not None:
       subset_names = [subset_names[scene_id]]
     for sname in subset_names:
-      traj_file = os.path.join(self.root, sname + '-evaluation/gt.log')
+      traj_file = os.path.join(self.root, 'gt_result', sname + '-evaluation/gt.log')
       assert os.path.exists(traj_file)
       traj = read_trajectory(traj_file)
       for ctraj in traj:
@@ -183,8 +183,8 @@ class ThreeDMatchTrajectoryDataset(PairDataset):
 
   def __getitem__(self, pair_index):
     sname, i, j, T_gt = self.files[pair_index]
-    ply_name0 = os.path.join(self.root, sname, f'cloud_bin_{i}.ply')
-    ply_name1 = os.path.join(self.root, sname, f'cloud_bin_{j}.ply')
+    ply_name0 = os.path.join(self.root, 'fragments', sname, f'cloud_bin_{i}.ply')
+    ply_name1 = os.path.join(self.root, 'fragments', sname, f'cloud_bin_{j}.ply')
 
     if self.return_ply_names:
       return sname, ply_name0, ply_name1, T_gt

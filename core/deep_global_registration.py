@@ -86,6 +86,7 @@ class DeepGlobalRegistration:
     self.network_config = network_config
     self.config.inlier_feature_type = network_config.inlier_feature_type
     self.voxel_size = network_config.voxel_size
+    # self.voxel_size = 0.30
     print(f'=> Setting voxel size to {self.voxel_size}')
 
     # FCGF network initialization
@@ -244,19 +245,22 @@ class DeepGlobalRegistration:
       # Step 1: Feature extraction
       self.feat_timer.tic()
       ## generate fpfh features
-      # pcd0 = make_open3d_point_cloud(xyz0)
-      # pcd1 = make_open3d_point_cloud(xyz1)
-      # pcd0.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*2, max_nn=30))
-      # fpfh0 = o3d.registration.compute_fpfh_feature(pcd0, o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*5, max_nn=100))
-      # fpfh_np0 = np.array(fpfh0.data).T
-      # pcd1.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*2, max_nn=30))
-      # fpfh1 = o3d.registration.compute_fpfh_feature(pcd1, o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*5, max_nn=100))
-      # fpfh_np1 = np.array(fpfh1.data).T
-      # fcgf_feats0 = torch.from_numpy(fpfh_np0).cuda()
-      # fcgf_feats1 = torch.from_numpy(fpfh_np1).cuda()
+      pcd0 = make_open3d_point_cloud(xyz0)
+      pcd1 = make_open3d_point_cloud(xyz1)
+      pcd0.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*2, max_nn=30))
+      fpfh0 = o3d.registration.compute_fpfh_feature(pcd0, o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*5, max_nn=100))
+      fpfh_np0 = np.array(fpfh0.data).T
+      pcd1.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*2, max_nn=30))
+      fpfh1 = o3d.registration.compute_fpfh_feature(pcd1, o3d.geometry.KDTreeSearchParamHybrid(radius=0.05*5, max_nn=100))
+      fpfh_np1 = np.array(fpfh1.data).T
+      fcgf_feats0 = torch.from_numpy(fpfh_np0).cuda()
+      fcgf_feats1 = torch.from_numpy(fpfh_np1).cuda()
+      import torch.nn.functional as F
+      fcgf_feats0 = F.normalize(fcgf_feats0, dim=-1)
+      fcgf_feats1 = F.normalize(fcgf_feats1, dim=-1)
 
-      fcgf_feats0 = self.fcgf_feature_extraction(feats0, coords0)
-      fcgf_feats1 = self.fcgf_feature_extraction(feats1, coords1)
+      # fcgf_feats0 = self.fcgf_feature_extraction(feats0, coords0)
+      # fcgf_feats1 = self.fcgf_feature_extraction(feats1, coords1)
       self.feat_timer.toc()
       # np.savez_compressed(
       #   os.path.join('KITTI_trainval/', f'kitti_pair_{i}'),
@@ -300,8 +304,8 @@ class DeepGlobalRegistration:
 
     # Step 5: Registration. Note: torch's gradient may be required at this stage
     # > Case 0: Weighted Procrustes + Robust Refinement
-    #wsum_threshold = max(200, len(weights) * 0.05)
-    wsum_threshold = -1
+    wsum_threshold = max(200, len(weights) * 0.05)
+    # wsum_threshold = -1
     sign = '>=' if wsum >= wsum_threshold else '<'
     print(f'=> Weighted sum {wsum:.2f} {sign} threshold {wsum_threshold}')
 

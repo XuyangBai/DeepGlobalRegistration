@@ -13,6 +13,7 @@ import open3d as o3d
 import time
 
 import torch
+import torch.nn.functional as F
 
 from config import get_config
 
@@ -76,17 +77,20 @@ def evaluate(config, data_loader, method):
 
         drive = data_dict['extra_packages'][0]['drive']
         xyz0, xyz1 = data_dict['pcd0'][0], data_dict['pcd1'][0]
+        feat0, feat1 = data_dict['sinput0_F'], data_dict['sinput1_F']
+        feat0 = F.normalize(feat0, dim=-1)
+        feat1 = F.normalize(feat1, dim=-1)
         T_gt = data_dict['T_gt'][0].numpy()
         xyz0np, xyz1np = xyz0.numpy(), xyz1.numpy()
 
         start = time.time() 
-        T_pred, precision, recall, outlier_rejection_time, safe_guard = method.register(xyz0np, xyz1np, T_gt=T_gt) 
+        T_pred, precision, recall, outlier_rejection_time, safe_guard = method.register(xyz0np, xyz1np, feat0, feat1, T_gt=T_gt) 
         end = time.time()
         total_safe_guard += safe_guard
 
         stats[i, :3] = rte_rre(T_pred, T_gt, TE_THRESH, RE_THRESH)
         stats[i, 3] = outlier_rejection_time # method.reg_timer.diff + method.feat_timer.diff
-        stats[i, 4] = drive
+        stats[i, 4] = safe_guard
         stats[i, 5] = precision
         stats[i, 6] = recall
 
@@ -113,7 +117,7 @@ def evaluate(config, data_loader, method):
         f" Precision: {precision*100:.2f}%, Recall: {recall*100:.2f}%")
 
     # Save results
-    filename = f'kitti-stats_{method.__class__.__name__}_noicp_nosg'
+    filename = f'kitti-stats_{method.__class__.__name__}_noicp_fpfh_retrain'
     #if config.out_filename is not None:
     #    filename += f'_{config.out_filename}'
     #if isinstance(method, FCGFWrapper):

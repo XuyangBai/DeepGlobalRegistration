@@ -121,6 +121,19 @@ class KITTIPairDataset(PairDataset):
     return fname
 
   def __getitem__(self, idx):
+    filename = self.files[idx]
+    drive = filename.split('/')[-1]
+    data = np.load(filename)
+    src_keypts = data['xyz0']
+    tgt_keypts = data['xyz1']
+    src_features = data['features0']
+    tgt_features = data['features1']
+    gt_trans = data['gt_trans']
+    return torch.from_numpy(src_keypts).float(), torch.from_numpy(tgt_keypts).float(), \
+      torch.from_numpy(src_keypts).float(), torch.from_numpy(tgt_keypts).float(), \
+      torch.from_numpy(src_features).float(), torch.from_numpy(tgt_features).float(),\
+      torch.from_numpy(np.array([])), torch.from_numpy(gt_trans), {'drive':1} 
+
     drive = self.files[idx][0]
     t0, t1 = self.files[idx][1], self.files[idx][2]
     all_odometry = self.get_video_odometry(drive, [t0, t1])
@@ -239,7 +252,7 @@ class KITTINMPairDataset(KITTIPairDataset):
                random_scale=True,
                manual_seed=False,
                config=None):
-    self.root = root = os.path.join(config.kitti_dir, 'dataset')
+    self.root = root = os.path.join(config.kitti_dir)
     self.icp_path = os.path.join(config.kitti_dir, config.icp_cache_path)
     try:
       os.mkdir(self.icp_path)
@@ -251,36 +264,39 @@ class KITTINMPairDataset(KITTIPairDataset):
 
     logging.info(f"Loading the subset {phase} from {root}")
 
-    subset_names = open(self.DATA_FILES[phase]).read().split()
-    for dirname in subset_names:
-      drive_id = int(dirname)
-      fnames = glob.glob(root + '/sequences/%02d/velodyne/*.bin' % drive_id)
-      assert len(fnames) > 0, f"Make sure that the path {root} has data {dirname}"
-      inames = sorted([int(os.path.split(fname)[-1][:-4]) for fname in fnames])
+    # subset_names = open(self.DATA_FILES[phase]).read().split()
+    # for dirname in subset_names:
+    #   drive_id = int(dirname)
+    #   fnames = glob.glob(root + '/sequences/%02d/velodyne/*.bin' % drive_id)
+    #   # assert len(fnames) > 0, f"Make sure that the path {root} has data {dirname}"
+    #   inames = sorted([int(os.path.split(fname)[-1][:-4]) for fname in fnames])
 
-      all_odo = self.get_video_odometry(drive_id, return_all=True)
-      all_pos = np.array([self.odometry_to_positions(odo) for odo in all_odo])
-      Ts = all_pos[:, :3, 3]
-      pdist = (Ts.reshape(1, -1, 3) - Ts.reshape(-1, 1, 3))**2
-      pdist = np.sqrt(pdist.sum(-1))
-      more_than_10 = pdist > self.MIN_DIST
-      curr_time = inames[0]
-      while curr_time in inames:
-        # Find the min index
-        next_time = np.where(more_than_10[curr_time][curr_time:curr_time + 100])[0]
-        if len(next_time) == 0:
-          curr_time += 1
-        else:
-          # Follow https://github.com/yewzijian/3DFeatNet/blob/master/scripts_data_processing/kitti/process_kitti_data.m#L44
-          next_time = next_time[0] + curr_time - 1
+    #   all_odo = self.get_video_odometry(drive_id, return_all=True)
+    #   all_pos = np.array([self.odometry_to_positions(odo) for odo in all_odo])
+    #   Ts = all_pos[:, :3, 3]
+    #   pdist = (Ts.reshape(1, -1, 3) - Ts.reshape(-1, 1, 3))**2
+    #   pdist = np.sqrt(pdist.sum(-1))
+    #   more_than_10 = pdist > self.MIN_DIST
+    #   curr_time = inames[0]
+    #   while curr_time in inames:
+    #     # Find the min index
+    #     next_time = np.where(more_than_10[curr_time][curr_time:curr_time + 100])[0]
+    #     if len(next_time) == 0:
+    #       curr_time += 1
+    #     else:
+    #       # Follow https://github.com/yewzijian/3DFeatNet/blob/master/scripts_data_processing/kitti/process_kitti_data.m#L44
+    #       next_time = next_time[0] + curr_time - 1
 
-        if next_time in inames:
-          self.files.append((drive_id, curr_time, next_time))
-          curr_time = next_time + 1
+    #     if next_time in inames:
+    #       self.files.append((drive_id, curr_time, next_time))
+    #       curr_time = next_time + 1
+
+    descriptor = 'fpfh'
+    self.files = [os.path.join(f"/data/KITTI/{descriptor}_test/", filename) for filename in os.listdir(f"/data/KITTI/{descriptor}_test/")]
 
     # Remove problematic sequence
-    for item in [
-        (8, 15, 58),
-    ]:
-      if item in self.files:
-        self.files.pop(self.files.index(item))
+    # for item in [
+    #     (8, 15, 58),
+    # ]:
+    #   if item in self.files:
+    #     self.files.pop(self.files.index(item))

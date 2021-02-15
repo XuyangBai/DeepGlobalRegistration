@@ -128,7 +128,7 @@ def evaluate(methods, method_names, data_loader, config, debug=False):
       stats[i, batch_idx, :3] = rte_rre(T, T_gt, config.success_rte_thresh,
                                         config.success_rre_thresh)
       stats[i, batch_idx, 3] = outlier_rejection_time # not including feature extraction time.
-      stats[i, batch_idx, 4] = sid
+      stats[i, batch_idx, 4] = safe_guard
       stats[i, batch_idx, 5] = precision
       stats[i, batch_idx, 6] = recall
       mask[batch_idx] = 1
@@ -143,7 +143,7 @@ def evaluate(methods, method_names, data_loader, config, debug=False):
   
   # Save results
   print(f"Total safe guard ratio: {total_safe_guard} / {tot_num_data}")
-  filename = f'3dmatch-stats_{method.__class__.__name__}' + '_noicp'
+  filename = f'3dmatch-stats_{method.__class__.__name__}' + '_noicp_fpfh'
   if os.path.isdir(config.out_dir):
     out_file = os.path.join(config.out_dir, filename)
   else:
